@@ -52,7 +52,7 @@ export const config = {
   },
 
   // ── The Guardian ───────────────────────────────────────────────────────────
-  // Global news with a non-US perspective.
+  // Global news with a non-US-centric perspective.
   guardian: {
     enabled: true,
     apiKey: process.env.GUARDIAN_API_KEY ?? "",

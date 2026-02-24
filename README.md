@@ -16,7 +16,7 @@ Built with **TypeScript + Node.js**.
 - 📬 **Dual email delivery** — SMTP (Gmail, Outlook, etc.) or SendGrid
 - ⏰ **Cron scheduling** — any schedule you like, runs as a persistent process
 
-![Email preview](public/emailBriefPeek.png)
+![Email preview](public/emailBrief.png)
 
 ---
 

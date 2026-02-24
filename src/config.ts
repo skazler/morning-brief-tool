@@ -5,8 +5,8 @@
 export const config = {
   // ── Schedule ───────────────────────────────────────────────────────────────
   // Standard cron syntax: "minute hour * * *"
-  // Default: 5:00 AM every day.  Try https://crontab.guru to build your own.
-  schedule: "0 5 * * *",
+  // Default: 5:00 AM CST every day.
+  schedule: "0 11 * * *",
 
   // ── Recipient ──────────────────────────────────────────────────────────────
   recipient: {

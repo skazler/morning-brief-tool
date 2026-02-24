@@ -1,6 +1,6 @@
 # ☀️ Morning Briefing
 
-A self-hosted, fully configurable daily email digest. Every morning it fetches weather, news headlines, category feeds, keyword searches, and a quote — then delivers a clean HTML email to your inbox.
+A self-hosted, fully configurable daily email digest. Every morning it fetches weather, tech news, and a quote — then delivers a clean HTML email to your inbox.
 
 Built with **TypeScript + Node.js**.
 
@@ -9,12 +9,14 @@ Built with **TypeScript + Node.js**.
 ## Features
 
 - 🌤 **Weather** — current conditions for any city (OpenWeatherMap)
-- 📰 **Top Headlines** — country-specific top stories (NewsAPI)
-- 📂 **Category News** — Technology, Business, Health, Science, Sports, Entertainment
-- 🔍 **Keyword Searches** — track any topic, company, or stock ticker
+- 📰 **Hacker News** — top technical stories, filtered by score (no key needed)
+- 🌍 **The Guardian** — global news with a non-US perspective
+- 🔍 **NewsAPI searches** — targeted keyword feeds (AI, semiconductors, etc.)
 - ✨ **Quote of the Day** — no API key needed (zenquotes.io)
 - 📬 **Dual email delivery** — SMTP (Gmail, Outlook, etc.) or SendGrid
 - ⏰ **Cron scheduling** — any schedule you like, runs as a persistent process
+
+![Email preview](public/emailBriefPeek.png)
 
 ---
 
@@ -22,7 +24,8 @@ Built with **TypeScript + Node.js**.
 
 - Node.js 18+
 - A free [OpenWeatherMap](https://openweathermap.org/api) API key
-- A free [NewsAPI](https://newsapi.org/register) API key
+- A free [The Guardian](https://open-platform.theguardian.com/access/) API key
+- A free [NewsAPI](https://newsapi.org/register) API key (optional)
 - An email account to send from (Gmail recommended, or a SendGrid account)
 
 ---
@@ -75,40 +78,34 @@ weather: {
 }
 ```
 
-### News — Top Headlines
+### Hacker News
 
 ```ts
-topHeadlines: {
+hackerNews: {
   enabled: true,
-  country: "us",         // us, gb, au, ca, de, fr, in, jp, ...
   pageSize: 5,
+  minScore: 100,    // only stories with at least this many upvotes
 }
 ```
 
-### News — Categories
-
-Toggle any category on or off, or adjust how many stories appear per section.
+### The Guardian
 
 ```ts
-categories: [
-  { name: "Technology", category: "technology", pageSize: 3, enabled: true  },
-  { name: "Business",   category: "business",   pageSize: 3, enabled: true  },
-  { name: "Science",    category: "science",    pageSize: 3, enabled: false },
-  { name: "Health",     category: "health",     pageSize: 3, enabled: false },
-]
+guardian: {
+  enabled: true,
+  sections: [
+    { name: "Global Tech News", query: "technology", pageSize: 5, enabled: true },
+    { name: "World News",       query: "world",      pageSize: 5, enabled: true },
+  ],
+}
 ```
 
-Valid category values: `business` `entertainment` `health` `science` `sports` `technology`
-
-### News — Keyword Searches
-
-Track anything — a company, a stock, a topic, a person.
+### NewsAPI — Keyword Searches
 
 ```ts
 searches: [
-  { name: "AI News",     query: "artificial intelligence", pageSize: 3, enabled: true },
-  { name: "Apple",       query: "AAPL OR Apple Inc",       pageSize: 3, enabled: true },
-  { name: "My Industry", query: "climate tech",            pageSize: 3, enabled: false },
+  { name: "AI & Machine Learning", query: "artificial intelligence OR LLM", pageSize: 5, enabled: true },
+  { name: "Semiconductors",        query: "semiconductor OR TSMC OR NVIDIA", pageSize: 5, enabled: true },
 ]
 ```
 
@@ -226,18 +223,21 @@ docker run -d --env-file .env --name morning-briefing morning-briefing
 
 ```
 morning-briefing/
+├── public/
+│   └── emailBriefPeek.png  ← email preview image
 ├── src/
 │   ├── services/
-│   │   ├── weather.ts  ← OpenWeatherMap fetcher
-│   │   ├── news.ts     ← NewsAPI fetcher (headlines, categories, searches)
-│   │   ├── quote.ts    ← ZenQuotes fetcher
-│   │   └── mailer.ts   ← SMTP + SendGrid sender
-│   ├── types/
-│   │   └── index.ts    ← Shared TypeScript types
-│   ├── config.ts       ← All user-facing settings (start here)
-│   ├── template.ts     ← HTML email renderer
-│   └── index.ts        ← Entry point + cron scheduler
-├── .env.example        ← Copy to .env and fill in your keys
+│   │   ├── guardian.ts     ← The Guardian API fetcher
+│   │   ├── hackernews.ts   ← Hacker News fetcher (no key needed)
+│   │   ├── mailer.ts       ← SMTP + SendGrid sender
+│   │   ├── news.ts         ← NewsAPI fetcher
+│   │   ├── quote.ts        ← ZenQuotes fetcher
+│   │   └── weather.ts      ← OpenWeatherMap fetcher
+│   ├── config.ts           ← All user-facing settings (start here)
+│   ├── index.ts            ← Entry point + cron scheduler
+│   ├── template.ts         ← HTML email renderer
+│   └── types.ts            ← Shared TypeScript types
+├── .env.example            ← Copy to .env and fill in your keys
 ├── .gitignore
 ├── package.json
 ├── tsconfig.json
@@ -251,7 +251,9 @@ morning-briefing/
 | Service | Used for | Free tier | Link |
 |---|---|---|---|
 | OpenWeatherMap | Weather | ✅ 1,000 calls/day | [openweathermap.org/api](https://openweathermap.org/api) |
-| NewsAPI | All news sections | ✅ 100 calls/day | [newsapi.org/register](https://newsapi.org/register) |
+| The Guardian | Global news | ✅ 500 calls/day | [open-platform.theguardian.com](https://open-platform.theguardian.com/access/) |
+| Hacker News | Tech stories | ✅ No key needed | automatic |
+| NewsAPI | Keyword searches | ✅ 100 calls/day | [newsapi.org/register](https://newsapi.org/register) |
 | ZenQuotes | Quote of the day | ✅ No key needed | automatic |
 
 ---

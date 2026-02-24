@@ -61,7 +61,7 @@ All content and scheduling options live in **`src/config.ts`**. API keys and cre
 Uses standard cron syntax. Default is 5:00 AM CT daily.
 
 ```ts
-schedule: "0 11 * * *",     // 5 AM CT (UTC-6) every day
+schedule: "0 5 * * *",     // 5 AM CT (UTC-6) every day
 ```
 
 → Use [crontab.guru](https://crontab.guru) to build your expression.

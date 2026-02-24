@@ -6,7 +6,6 @@ import cron from "node-cron";
 import { format } from "date-fns";
 import { config } from "./config";
 import { fetchWeather } from "./services/weather";
-import { fetchNewsSections } from "./services/news";
 import { fetchHackerNews } from "./services/hackernews";
 import { fetchGuardianSections } from "./services/guardian";
 import { fetchQuote } from "./services/quote";
@@ -19,27 +18,24 @@ import { BriefingData } from "./types";
 async function runBriefing(): Promise<void> {
   console.log(`\n[briefing] Running at ${new Date().toISOString()}`);
 
-  const [weather, newsSections, hackerNews, guardianSections, quote] =
-    await Promise.all([
-      config.weather.enabled ? fetchWeather() : Promise.resolve(undefined),
-      config.news.enabled ? fetchNewsSections() : Promise.resolve([]),
-      config.hackerNews.enabled ? fetchHackerNews() : Promise.resolve(null),
-      config.guardian.enabled ? fetchGuardianSections() : Promise.resolve([]),
-      config.quote.enabled ? fetchQuote() : Promise.resolve(undefined),
-    ]);
+  const [weather, hackerNews, guardianSections, quote] = await Promise.all([
+    config.weather.enabled ? fetchWeather() : Promise.resolve(undefined),
+    config.hackerNews.enabled ? fetchHackerNews() : Promise.resolve(null),
+    config.guardian.enabled ? fetchGuardianSections() : Promise.resolve([]),
+    config.quote.enabled ? fetchQuote() : Promise.resolve(undefined),
+  ]);
 
-  // Order: Guardian world → Guardian tech → HN → NewsAPI searches
-  const allNewsSections = [
+  // Order: Guardian world → Guardian tech → Hacker News
+  const newsSections = [
     ...guardianSections,
     ...(hackerNews ? [hackerNews] : []),
-    ...newsSections,
   ];
 
   const briefing: BriefingData = {
     recipientName: config.recipient.name,
     date: format(new Date(), "EEEE, MMMM do yyyy"),
     weather: weather ?? undefined,
-    newsSections: allNewsSections,
+    newsSections,
     quote: quote ?? undefined,
   };
 

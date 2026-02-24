@@ -8,7 +8,8 @@ import { config } from "../config";
 export async function fetchGuardianSection(
   name: string,
   query: string,
-  pageSize: number
+  pageSize: number,
+  section?: string
 ): Promise<NewsSection | null> {
   const { apiKey } = config.guardian;
   if (!apiKey) {
@@ -17,17 +18,19 @@ export async function fetchGuardianSection(
   }
 
   try {
+    const params: Record<string, string | number> = {
+      "api-key": apiKey,
+      "page-size": pageSize,
+      "show-fields": "trailText",
+      "order-by": "newest",
+    };
+
+    if (query) params.q = query;
+    if (section) params.section = section;
+
     const { data } = await axios.get(
       "https://content.guardianapis.com/search",
-      {
-        params: {
-          q: query,
-          "api-key": apiKey,
-          "page-size": pageSize,
-          "show-fields": "trailText",
-          "order-by": "newest",
-        },
-      }
+      { params }
     );
 
     const articles: NewsArticle[] = data.response.results.map((a: any) => ({
@@ -56,7 +59,7 @@ export async function fetchGuardianSections(): Promise<NewsSection[]> {
   const results = await Promise.all(
     sections
       .filter((s) => s.enabled)
-      .map((s) => fetchGuardianSection(s.name, s.query, s.pageSize))
+      .map((s) => fetchGuardianSection(s.name, s.query, s.pageSize, s.section))
   );
   return results.filter((s): s is NewsSection => s !== null);
 }

@@ -6,16 +6,26 @@ import { config } from "../config";
 // Docs: https://hn.algolia.com/api
 
 export async function fetchHackerNews(): Promise<NewsSection | null> {
-  const { pageSize, minScore } = config.hackerNews;
+  const { pageSize, minScore, hoursBack } = config.hackerNews;
+
+  // Only fetch stories published within the configured window
+  const since = Math.floor(Date.now() / 1000) - hoursBack * 60 * 60;
 
   try {
     const { data } = await axios.get("https://hn.algolia.com/api/v1/search", {
       params: {
         tags: "story",
-        numericFilters: `points>=${minScore}`,
+        numericFilters: `points>=${minScore},created_at_i>${since}`,
         hitsPerPage: pageSize,
       },
     });
+
+    if (!data.hits.length) {
+      console.warn(
+        "[hackernews] No stories found — try lowering minScore or increasing hoursBack."
+      );
+      return null;
+    }
 
     const articles: NewsArticle[] = data.hits.map((h: any) => ({
       title: h.title,

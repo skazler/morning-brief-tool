@@ -1,6 +1,6 @@
 # ☀️ Morning Briefing
 
-A self-hosted, fully configurable daily email digest. Every morning it fetches weather, news, and a quote — then delivers a clean HTML email to your inbox.
+A self-hosted, fully configurable daily email digest. Every morning it fetches weather, tech news, and a quote — then delivers a clean HTML email to your inbox.
 
 Built with **TypeScript + Node.js**.
 

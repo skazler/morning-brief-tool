@@ -11,7 +11,7 @@ export async function fetchWeather(): Promise<WeatherData | null> {
   }
 
   try {
-    // Support both "City Name" and "lat,lon" formats
+    // support both "City Name" and "lat,lon" formats
     const isLatLon = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(location.trim());
     const queryParam = isLatLon
       ? (() => {

@@ -1,3 +1,7 @@
+import dotenv from "dotenv";
+import path from "path";
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
 import cron from "node-cron";
 import { format } from "date-fns";
 import { config } from "./config";

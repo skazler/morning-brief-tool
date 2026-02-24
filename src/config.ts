@@ -1,6 +1,3 @@
-import dotenv from "dotenv";
-dotenv.config();
-
 // ─────────────────────────────────────────────────────────────────────────────
 // MORNING BRIEFING — CONFIGURATION
 // Edit this file to customise exactly what lands in your inbox each morning.

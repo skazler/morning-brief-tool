@@ -4,8 +4,6 @@
 
 export const config = {
   // ── Schedule ───────────────────────────────────────────────────────────────
-  // Standard cron syntax: "minute hour * * *"
-  // Default: 5:00 AM CT every day.
   schedule: "0 5 * * *",
 
   // ── Recipient ──────────────────────────────────────────────────────────────
@@ -16,21 +14,13 @@ export const config = {
 
   // ── Email delivery ─────────────────────────────────────────────────────────
   email: {
-    provider: (process.env.EMAIL_PROVIDER ?? "smtp") as "smtp" | "sendgrid",
     from: {
       name: process.env.FROM_NAME ?? "Morning Briefing",
-      email: process.env.FROM_EMAIL ?? "",
     },
     subject: "☀️ Your Morning Briefing — {date}",
-    smtp: {
-      host: process.env.SMTP_HOST ?? "smtp.gmail.com",
-      port: parseInt(process.env.SMTP_PORT ?? "587"),
-      secure: process.env.SMTP_SECURE === "true",
-      user: process.env.SMTP_USER ?? "",
-      pass: process.env.SMTP_PASS ?? "",
-    },
-    sendgrid: {
-      apiKey: process.env.SENDGRID_API_KEY ?? "",
+    resend: {
+      apiKey: process.env.RESEND_API_KEY ?? "",
+      fromAddress: process.env.RESEND_FROM_ADDRESS ?? "onboarding@resend.dev",
     },
   },
 
@@ -42,8 +32,15 @@ export const config = {
     units: (process.env.WEATHER_UNITS ?? "imperial") as "imperial" | "metric",
   },
 
+  // ── Hacker News ────────────────────────────────────────────────────────────
+  hackerNews: {
+    enabled: true,
+    pageSize: 5,
+    minScore: 50,
+    hoursBack: 24,
+  },
+
   // ── The Guardian ───────────────────────────────────────────────────────────
-  // Global news with a non-US-centric perspective.
   guardian: {
     enabled: true,
     apiKey: process.env.GUARDIAN_API_KEY ?? "",
@@ -51,28 +48,18 @@ export const config = {
       {
         name: "Global Tech News",
         section: "technology",
-        query:
-          'AI OR semiconductor OR machine learning OR semiconductor OR "big tech"',
+        query: "",
         pageSize: 5,
         enabled: true,
       },
       {
         name: "World News",
         section: "world",
-        query: "world",
+        query: "",
         pageSize: 5,
         enabled: true,
       },
     ],
-  },
-
-  // ── Hacker News ────────────────────────────────────────────────────────────
-  // Top technical stories from the HN community.
-  hackerNews: {
-    enabled: true,
-    pageSize: 5,
-    minScore: 50,
-    hoursBack: 24,
   },
 
   // ── Quote of the day ───────────────────────────────────────────────────────

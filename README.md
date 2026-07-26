@@ -146,11 +146,36 @@ the Resend dashboard and use an address on it.
 | `RESEND_FROM_ADDRESS` | verified sender address |
 | `OPENWEATHER_API_KEY` | weather |
 | `GUARDIAN_API_KEY` | news |
+| `DISCORD_WEBHOOK_URL` | posting the brief to a Discord channel |
 | `TRIGGER_SECRET` | guards `POST /run` and `GET /preview` |
 
 `./scripts/push-secrets.sh` pushes all of them from `.env` and generates
 `TRIGGER_SECRET` on first run, saving a local copy to `.trigger-secret` (gitignored).
 Verify with `npx wrangler secret list`.
+
+---
+
+## Delivery channels
+
+Email and Discord are independent and each switches itself on when its
+credentials are present:
+
+| Configured | Result |
+|---|---|
+| `RESEND_API_KEY` + `RECIPIENT_EMAIL` | HTML email |
+| `DISCORD_WEBHOOK_URL` | embeds posted to the channel |
+| both | both, delivered concurrently |
+| neither | the run throws — a briefing with nowhere to go is a bug, not a no-op |
+
+```bash
+npx wrangler secret put DISCORD_WEBHOOK_URL   # Edit Channel → Integrations → Webhooks
+```
+
+One channel failing does not stop the other; the run only fails when *every*
+channel does. The Discord post is embeds rather than a plain message because
+message text caps at 2000 characters and fifteen headlines exceed that on their
+own — see `src/services/discord.ts` for how the 6000-character aggregate budget
+is enforced.
 
 `RECIPIENT_NAME` and `WEATHER_LOCATION` are secrets rather than `vars` on purpose:
 `wrangler.jsonc` is committed, and a first name plus a city identifies you.

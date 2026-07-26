@@ -4,6 +4,7 @@ import { fetchHackerNews } from "./services/hackernews";
 import { fetchGuardianSections } from "./services/guardian";
 import { fetchQuote } from "./services/quote";
 import { sendEmail } from "./services/mailer";
+import { sendDiscord } from "./services/discord";
 import { renderEmail } from "./template";
 import { formatLongDate, formatShortDate, shouldRunNow } from "./time";
 import { BriefingData } from "./types";
@@ -17,7 +18,7 @@ import { BriefingData } from "./types";
  */
 async function buildBriefing(
   cfg: Config
-): Promise<{ subject: string; html: string }> {
+): Promise<{ subject: string; html: string; briefing: BriefingData }> {
   const now = new Date();
   const { timezone } = cfg.schedule;
 
@@ -48,14 +49,57 @@ async function buildBriefing(
       formatShortDate(now, timezone)
     ),
     html: renderEmail(briefing),
+    briefing,
   };
 }
 
+/**
+ * Deliver to every configured channel.
+ *
+ * `allSettled` rather than `all`: email and Discord have no reason to share a
+ * fate, and a Resend outage shouldn't cost the Discord post. The run still
+ * throws when *every* channel failed, so a total outage marks the cron
+ * invocation failed and shows up in observability instead of logging quietly.
+ */
 async function runBriefing(cfg: Config): Promise<void> {
   console.log(`[briefing] Running at ${new Date().toISOString()}`);
-  const { subject, html } = await buildBriefing(cfg);
-  await sendEmail(cfg, { subject, html });
-  console.log("[briefing] Done ✓");
+
+  const { subject, html, briefing } = await buildBriefing(cfg);
+
+  const channels: { name: string; send: () => Promise<void> }[] = [];
+  if (cfg.email.enabled) {
+    channels.push({ name: "email", send: () => sendEmail(cfg, { subject, html }) });
+  }
+  if (cfg.discord.enabled) {
+    channels.push({ name: "discord", send: () => sendDiscord(cfg, briefing) });
+  }
+
+  if (channels.length === 0) {
+    throw new Error(
+      "No delivery channel configured — set RESEND_API_KEY + RECIPIENT_EMAIL, " +
+        "or DISCORD_WEBHOOK_URL, or both."
+    );
+  }
+
+  const results = await Promise.allSettled(channels.map((c) => c.send()));
+
+  const failures = results.flatMap((result, i) =>
+    result.status === "rejected"
+      ? [`${channels[i].name}: ${result.reason?.message ?? result.reason}`]
+      : []
+  );
+
+  for (const failure of failures) {
+    console.error(`[briefing] Delivery failed — ${failure}`);
+  }
+
+  if (failures.length === channels.length) {
+    throw new Error(`All delivery channels failed — ${failures.join(" · ")}`);
+  }
+
+  console.log(
+    `[briefing] Done ✓ (${channels.length - failures.length}/${channels.length} delivered)`
+  );
 }
 
 // ─── Manual-trigger auth ──────────────────────────────────────────────────────

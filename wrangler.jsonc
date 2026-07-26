@@ -40,6 +40,5 @@
   //   RESEND_FROM_ADDRESS   verified sender, or onboarding@resend.dev
   //   OPENWEATHER_API_KEY   openweathermap.org/api
   //   GUARDIAN_API_KEY      open-platform.theguardian.com/access
-  //   DISCORD_WEBHOOK_URL   channel webhook; set ⇒ also posted to Discord
   //   TRIGGER_SECRET        guards POST /run and GET /preview
 }

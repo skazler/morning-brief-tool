@@ -28,7 +28,6 @@ SECRETS=(
   RESEND_FROM_ADDRESS
   OPENWEATHER_API_KEY
   GUARDIAN_API_KEY
-  DISCORD_WEBHOOK_URL
 )
 
 # Read one KEY=value from the env file. Tolerates surrounding quotes and

@@ -20,13 +20,11 @@ export interface Env {
   RECIPIENT_NAME?: string;
 
   // ── secrets (wrangler secret put) ──
-  RECIPIENT_EMAIL?: string;
-  RESEND_API_KEY?: string;
+  RECIPIENT_EMAIL: string;
+  RESEND_API_KEY: string;
   RESEND_FROM_ADDRESS?: string;
   OPENWEATHER_API_KEY?: string;
   GUARDIAN_API_KEY?: string;
-  /** Channel webhook. Set ⇒ the briefing is also posted to Discord. */
-  DISCORD_WEBHOOK_URL?: string;
   /** Guards the manual-trigger HTTP endpoint. Unset ⇒ endpoint refuses all requests. */
   TRIGGER_SECRET?: string;
 }
@@ -50,14 +48,8 @@ export function makeConfig(env: Env) {
       email: env.RECIPIENT_EMAIL || "",
     },
 
-    // ── Delivery ─────────────────────────────────────────────────────────────
-    // Two independent channels. Each turns itself on when its credentials are
-    // present, so adding Discord is `wrangler secret put DISCORD_WEBHOOK_URL`
-    // and nothing else — and dropping email is deleting its two secrets. A run
-    // with no channel configured is an error rather than a silent no-op; see
-    // `runBriefing`.
+    // ── Email delivery ───────────────────────────────────────────────────────
     email: {
-      enabled: Boolean(env.RESEND_API_KEY && env.RECIPIENT_EMAIL),
       from: {
         name: env.FROM_NAME || "Morning Briefing",
       },
@@ -66,11 +58,6 @@ export function makeConfig(env: Env) {
         apiKey: env.RESEND_API_KEY || "",
         fromAddress: env.RESEND_FROM_ADDRESS || "onboarding@resend.dev",
       },
-    },
-
-    discord: {
-      enabled: Boolean(env.DISCORD_WEBHOOK_URL),
-      webhookUrl: env.DISCORD_WEBHOOK_URL || "",
     },
 
     // ── Weather ──────────────────────────────────────────────────────────────

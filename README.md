@@ -153,6 +153,9 @@ the Resend dashboard and use an address on it.
 `TRIGGER_SECRET` on first run, saving a local copy to `.trigger-secret` (gitignored).
 Verify with `npx wrangler secret list`.
 
+`RECIPIENT_NAME` and `WEATHER_LOCATION` are secrets rather than `vars` on purpose:
+`wrangler.jsonc` is committed, and a first name plus a city identifies you.
+
 ---
 
 ## Delivery channels
@@ -177,9 +180,6 @@ message text caps at 2000 characters and fifteen headlines exceed that on their
 own — see `src/services/discord.ts` for how the 6000-character aggregate budget
 is enforced.
 
-`RECIPIENT_NAME` and `WEATHER_LOCATION` are secrets rather than `vars` on purpose:
-`wrangler.jsonc` is committed, and a first name plus a city identifies you.
-
 ---
 
 ## Manual trigger
@@ -199,14 +199,40 @@ If `TRIGGER_SECRET` is unset the endpoints return `503` and refuse everything.
 
 ---
 
+## Deployment
+
+**Push to `main` and it ships.** `.github/workflows/deploy.yml` typechecks, verifies the
+bundle, and runs `wrangler deploy`. Pull requests run the checks only — never a deploy.
+`workflow_dispatch` lets you re-deploy current `main` from the Actions tab without an
+empty commit.
+
+Two repository secrets are required:
+
+| Secret | Where to get it |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | [API Tokens](https://dash.cloudflare.com/profile/api-tokens) → Create Token → **Edit Cloudflare Workers** template. Scope Account Resources to your account. Not a Global API Key. |
+| `CLOUDFLARE_ACCOUNT_ID` | Any zone's dashboard Overview, or `npx wrangler whoami` |
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN     # prompts, so it stays out of shell history
+gh secret set CLOUDFLARE_ACCOUNT_ID
+```
+
+CI never needs the weather/news/Resend keys: `wrangler deploy` doesn't touch Worker
+secrets, which are set once against Cloudflare and persist across deploys.
+
+Deploys are serialised with a `concurrency` group, so a queued run can't overwrite a
+newer version with an older bundle.
+
 ## Operations
 
 ```bash
-npx wrangler deploy            # ship it
+npx wrangler deploy            # manual ship, if you're bypassing CI
 npx wrangler tail              # live logs
 npx wrangler secret list       # what's configured
 npm run typecheck              # tsc --noEmit
 npx wrangler deploy --dry-run  # verify the bundle without shipping
+gh run watch                   # follow the deploy that's running now
 ```
 
 Cron runs also show up under **Workers → morning-brief → Logs** in the dashboard
@@ -222,6 +248,8 @@ to exercise the job by hand.
 
 ```
 morning-brief-tool/
+├── .github/workflows/
+│   └── deploy.yml          ← CI: typecheck, bundle, deploy on push to main
 ├── public/
 │   └── emailBrief.png      ← email preview image
 ├── scripts/

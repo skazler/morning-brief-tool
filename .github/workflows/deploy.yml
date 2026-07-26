@@ -1,0 +1,113 @@
+# Deploys the Worker on every push to main — the pipeline Railway used to provide.
+#
+# Railway watched main and redeployed on push. When the brief moved to Cloudflare
+# that automation went with it, leaving `wrangler deploy` as a manual step run from
+# a laptop. This restores it.
+#
+# What this does NOT touch: Worker secrets. They live in Cloudflare and are set
+# once with `wrangler secret put` (or ./scripts/push-secrets.sh). `wrangler deploy`
+# leaves them alone, so CI needs no API keys for weather, news, or Resend — only
+# credentials to talk to Cloudflare.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Lets you re-deploy the current main from the Actions tab without an empty commit.
+  workflow_dispatch:
+
+# Never let two deploys race. A queued run waits rather than overwriting a
+# newer version with an older bundle.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck and bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Catches anything that type-checks but can't be bundled for workerd —
+      # a Node-only import, say. Needs no credentials.
+      - name: Verify the Worker bundles
+        run: npx wrangler deploy --dry-run
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: check
+    # PRs run `check` only. Deploy is main-and-manual.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Fail with an actionable message rather than letting wrangler emit an
+      # opaque auth error. Secrets arrive via env, never interpolated into the
+      # script body — `${{ }}` inside `run` expands before bash sees it, which
+      # both risks shell injection and puts the value in the run's script text.
+      - name: Check Cloudflare credentials are configured
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            missing="$missing CLOUDFLARE_API_TOKEN"
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — see .github/workflows/deploy.yml for setup."
+            exit 1
+          fi
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+# ── One-time setup ───────────────────────────────────────────────────────────
+#
+# 1. Create a scoped Cloudflare API token — do NOT use a Global API Key:
+#      dash.cloudflare.com/profile/api-tokens → Create Token
+#      → "Edit Cloudflare Workers" template
+#      → restrict Account Resources to your account only
+#
+# 2. Add both as repository secrets (each prompts for the value, so it never
+#    lands in your shell history):
+#      gh secret set CLOUDFLARE_API_TOKEN
+#      gh secret set CLOUDFLARE_ACCOUNT_ID
+#
+#    Account ID is on the right-hand side of any zone's dashboard Overview page,
+#    or from `npx wrangler whoami`.
+#
+# 3. Push to main. Watch it with `gh run watch`.

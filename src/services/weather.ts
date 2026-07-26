@@ -1,9 +1,9 @@
-import axios from "axios";
-import { config } from "../config";
+import { Config } from "../config";
 import { WeatherData } from "../types";
+import { getJson } from "./http";
 
-export async function fetchWeather(): Promise<WeatherData | null> {
-  const { apiKey, location, units } = config.weather;
+export async function fetchWeather(cfg: Config): Promise<WeatherData | null> {
+  const { apiKey, location, units } = cfg.weather;
 
   if (!apiKey) {
     console.warn("[weather] No API key set — skipping weather.");
@@ -13,15 +13,18 @@ export async function fetchWeather(): Promise<WeatherData | null> {
   try {
     // support both "City Name" and "lat,lon" formats
     const isLatLon = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(location.trim());
-    const queryParam = isLatLon
+    const query: Record<string, string> = isLatLon
       ? (() => {
           const [lat, lon] = location.split(",");
-          return `lat=${lat.trim()}&lon=${lon.trim()}`;
+          return { lat: lat.trim(), lon: lon.trim() };
         })()
-      : `q=${encodeURIComponent(location)}`;
+      : { q: location };
 
-    const url = `https://api.openweathermap.org/data/2.5/weather?${queryParam}&units=${units}&appid=${apiKey}`;
-    const { data } = await axios.get(url);
+    const data = await getJson("https://api.openweathermap.org/data/2.5/weather", {
+      ...query,
+      units,
+      appid: apiKey,
+    });
 
     return {
       city: data.name,
@@ -34,10 +37,7 @@ export async function fetchWeather(): Promise<WeatherData | null> {
       units,
     };
   } catch (err: any) {
-    console.error(
-      "[weather] Failed to fetch:",
-      err.response?.data ?? err.message
-    );
+    console.error("[weather] Failed to fetch:", err.message);
     return null;
   }
 }

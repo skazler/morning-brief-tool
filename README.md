@@ -2,7 +2,7 @@
 
 A self-hosted, fully configurable daily email digest. Every morning it fetches weather, tech news, and a quote — then delivers a clean HTML email to your inbox.
 
-Built with **TypeScript + Node.js**.
+Runs on **Cloudflare Workers** — a cron trigger, no server, no container, nothing to keep awake.
 
 ---
 
@@ -11,10 +11,9 @@ Built with **TypeScript + Node.js**.
 - 🌤 **Weather** — current conditions for any city (OpenWeatherMap)
 - 📰 **Hacker News** — top technical stories, filtered by score (no key needed)
 - 🌍 **The Guardian** — global news with a non-US perspective
-- 🔍 **NewsAPI searches** — targeted keyword feeds (AI, semiconductors, etc.)
 - ✨ **Quote of the Day** — no API key needed (zenquotes.io)
-- 📬 **Dual email delivery** — SMTP (Gmail, Outlook, etc.) or SendGrid
-- ⏰ **Cron scheduling** — any schedule you like, runs as a persistent process
+- 📬 **Email delivery** — via [Resend](https://resend.com)
+- ⏰ **Cron trigger** — fires once a day, DST-correct, costs nothing when idle
 
 ![Email preview](public/emailBrief.png)
 
@@ -22,224 +21,203 @@ Built with **TypeScript + Node.js**.
 
 ## Prerequisites
 
-- Node.js 18+
+- A [Cloudflare account](https://dash.cloudflare.com/sign-up) (the free plan is enough for this)
+- Node.js 20+ — only to run `wrangler` locally; the Worker itself has no Node dependency
+- A free [Resend](https://resend.com) API key
 - A free [OpenWeatherMap](https://openweathermap.org/api) API key
 - A free [The Guardian](https://open-platform.theguardian.com/access/) API key
-- A free [NewsAPI](https://newsapi.org/register) API key (optional)
-- An email account to send from (Gmail recommended, or a SendGrid account)
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Install dependencies
+# 1. Install tooling (wrangler + types; the Worker has zero runtime deps)
 npm install
 
-# 2. Set up environment
+# 2. Set up secrets
 cp .env.example .env
-# → open .env and fill in your keys and credentials
+# → open .env and fill in your keys
+./scripts/push-secrets.sh        # pipes them into Cloudflare, never echoes them
 
-# 3. Build
-npm run build
+# 3. Deploy
+npx wrangler deploy
 
-# 4. Send a test briefing right now
-node dist/index.js --now
-
-# 5. Start the scheduler
-node dist/index.js
+# 4. Send one right now to check it works
+curl -X POST -H "authorization: Bearer $(cat .trigger-secret)" \
+  https://morning-brief.<your-subdomain>.workers.dev/run
 ```
+
+Working on the template? `npm run dev` and open `/preview?key=…` — it renders the email
+without sending anything. Copy `.env` to `.dev.vars` first so local runs see your keys.
 
 ---
 
 ## Configuration
 
-All content and scheduling options live in **`src/config.ts`**. API keys and credentials live in **`.env`**. You should only ever need to touch those two files.
+Three places, in the order you'll reach for them:
+
+| File | Holds | Committed? |
+|---|---|---|
+| `src/config.ts` | What's *in* the email — sections, page sizes, score thresholds | yes |
+| `wrangler.jsonc` | Schedule, timezone, units, sender name | yes |
+| Cloudflare secrets | API keys, your email, your name, your city | **no** |
 
 ### Schedule
 
-Uses standard cron syntax. Default is 5:00 AM CT daily.
+The time lives in `wrangler.jsonc` **twice**, and both have to agree:
 
-```ts
-schedule: "0 5 * * *",     // 5 AM CT (UTC-6) every day
-```
-
-→ Use [crontab.guru](https://crontab.guru) to build your expression.
-
-### Weather
-
-```ts
-weather: {
-  enabled: true,
-  location: "Austin",    // city name, or "lat,lon" e.g. "30.2672,-97.7431"
-  units: "imperial",     // "imperial" (°F, mph) or "metric" (°C, m/s)
+```jsonc
+"vars": {
+  "TIMEZONE": "America/Chicago",
+  "DAILY_HOUR": "5",            // ← 5 AM local
+  "DAILY_MINUTE": "0"
+},
+"triggers": {
+  "crons": ["0 10,11 * * *"]    // ← 05:00 CDT = 10:00 UTC, 05:00 CST = 11:00 UTC
 }
 ```
 
-### Hacker News
+**Why two hours.** Cloudflare cron is UTC-only, so the Worker is woken at both the
+CDT and CST candidate times and `shouldRunNow()` (`src/time.ts`) drops the one that
+isn't 5 AM local. Without this the brief drifts an hour every March and November.
+The `vars` decide *whether* to run; the cron decides *when the Worker wakes at all*.
+
+To move the time, change both — use [crontab.guru](https://crontab.guru), and remember
+the two UTC hours are `local + 5` and `local + 6` for US Central.
+
+> ⚠️ Never use bare `new Date().getHours()` or `toLocaleTimeString()` in this codebase.
+> A Worker's clock is UTC and there is no `TZ` to set, so those silently mean UTC.
+> Use the helpers in `src/time.ts`, which all take an explicit timezone.
+
+### Weather
+
+`WEATHER_LOCATION` is a secret (a city name is deanonymizing); `WEATHER_UNITS` is a var.
+
+```jsonc
+"WEATHER_UNITS": "imperial"     // "imperial" (°F, mph) or "metric" (°C, m/s)
+```
+
+Location accepts a city name or `"lat,lon"` — e.g. `Austin` or `30.2672,-97.7431`.
+
+### Content — `src/config.ts`
 
 ```ts
 hackerNews: {
   enabled: true,
   pageSize: 5,
-  minScore: 100,    // only stories with at least this many upvotes
-}
-```
+  minScore: 50,     // only stories with at least this many upvotes
+  hoursBack: 24,
+},
 
-### The Guardian
-
-```ts
 guardian: {
   enabled: true,
   sections: [
-    { name: "Global Tech News", query: "technology", pageSize: 5, enabled: true },
-    { name: "World News",       query: "world",      pageSize: 5, enabled: true },
+    { name: "Global Tech News", section: "technology", query: "", pageSize: 5, enabled: true },
+    { name: "World News",       section: "world",      query: "", pageSize: 5, enabled: true },
   ],
-}
+},
+
+quote: { enabled: true },       // false removes the section entirely
 ```
 
-### NewsAPI — Keyword Searches
-
-```ts
-searches: [
-  { name: "AI & Machine Learning", query: "artificial intelligence OR LLM", pageSize: 5, enabled: true },
-  { name: "Semiconductors",        query: "semiconductor OR TSMC OR NVIDIA", pageSize: 5, enabled: true },
-]
-```
-
-### Quote of the Day
-
-```ts
-quote: {
-  enabled: true,   // set false to remove the section entirely
-}
-```
+Every fetcher swallows its own errors and returns `null`, so a dead upstream costs you
+that one section rather than the whole email.
 
 ---
 
 ## Email setup
 
-Set `EMAIL_PROVIDER` in `.env` to either `smtp` or `sendgrid`.
-
-### Gmail (SMTP)
-
-Gmail requires an **App Password** — it won't accept your regular password.
-
-1. Enable 2-Factor Auth on your Google account
-2. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-3. Create an App Password for "Mail"
-4. Use your Gmail address as `SMTP_USER` and the generated password as `SMTP_PASS`
-
-```env
-EMAIL_PROVIDER=smtp
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=you@gmail.com
-SMTP_PASS=xxxx-xxxx-xxxx-xxxx
-```
-
-### SendGrid
-
-```env
-EMAIL_PROVIDER=sendgrid
-SENDGRID_API_KEY=SG.xxxxxxxxxxxxxxxx
-```
-
-Make sure your `FROM_EMAIL` is a verified sender in your SendGrid account.
+Set `RESEND_API_KEY` and `RESEND_FROM_ADDRESS`. The default sender,
+`onboarding@resend.dev`, works immediately with no DNS setup but can only send to the
+address that owns the Resend account. To send anywhere else, verify your own domain in
+the Resend dashboard and use an address on it.
 
 ---
 
-## Running in production
+## Secrets
 
-### PM2 (recommended)
+| Secret | Used for |
+|---|---|
+| `RECIPIENT_NAME` | greeting in the email body |
+| `RECIPIENT_EMAIL` | where the brief is sent |
+| `WEATHER_LOCATION` | city name, or `lat,lon` |
+| `RESEND_API_KEY` | sending the email |
+| `RESEND_FROM_ADDRESS` | verified sender address |
+| `OPENWEATHER_API_KEY` | weather |
+| `GUARDIAN_API_KEY` | news |
+| `TRIGGER_SECRET` | guards `POST /run` and `GET /preview` |
 
-```bash
-npm install -g pm2
-npm run build
-pm2 start dist/index.js --name morning-briefing
-pm2 save
-pm2 startup
-```
+`./scripts/push-secrets.sh` pushes all of them from `.env` and generates
+`TRIGGER_SECRET` on first run, saving a local copy to `.trigger-secret` (gitignored).
+Verify with `npx wrangler secret list`.
 
-Useful commands:
+`RECIPIENT_NAME` and `WEATHER_LOCATION` are secrets rather than `vars` on purpose:
+`wrangler.jsonc` is committed, and a first name plus a city identifies you.
 
-```bash
-pm2 logs morning-briefing     # tail logs
-pm2 restart morning-briefing  # restart after config changes
-pm2 stop morning-briefing
-```
+---
 
-### systemd (Linux)
+## Manual trigger
 
-Create `/etc/systemd/system/morning-briefing.service`:
-
-```ini
-[Unit]
-Description=Morning Briefing
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/path/to/morning-briefing
-ExecStart=/usr/bin/node dist/index.js
-EnvironmentFile=/path/to/morning-briefing/.env
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
+Both endpoints require `TRIGGER_SECRET`, as `Authorization: Bearer …` or `?key=…`.
+Prefer the header — query strings are recorded in request logs.
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable morning-briefing
-sudo systemctl start morning-briefing
-sudo journalctl -u morning-briefing -f   # tail logs
+KEY=$(cat .trigger-secret)
+BASE=https://morning-brief.<your-subdomain>.workers.dev
+
+curl -X POST -H "authorization: Bearer $KEY" "$BASE/run"       # send it now
+curl        -H "authorization: Bearer $KEY" "$BASE/preview"    # render, don't send
 ```
 
-### Docker
+If `TRIGGER_SECRET` is unset the endpoints return `503` and refuse everything.
 
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-CMD ["node", "dist/index.js"]
-```
+---
+
+## Operations
 
 ```bash
-docker build -t morning-briefing .
-docker run -d --env-file .env --name morning-briefing morning-briefing
+npx wrangler deploy            # ship it
+npx wrangler tail              # live logs
+npx wrangler secret list       # what's configured
+npm run typecheck              # tsc --noEmit
+npx wrangler deploy --dry-run  # verify the bundle without shipping
 ```
+
+Cron runs also show up under **Workers → morning-brief → Logs** in the dashboard
+(`observability` is enabled in `wrangler.jsonc`). A failed run throws rather than
+logging quietly, so it surfaces as a failed invocation instead of a silent no-email.
+
+Note that `wrangler dev` does **not** fire cron triggers locally — use `POST /run`
+to exercise the job by hand.
 
 ---
 
 ## Project structure
 
 ```
-morning-briefing/
+morning-brief-tool/
 ├── public/
-│   └── emailBriefPeek.png  ← email preview image
+│   └── emailBrief.png      ← email preview image
+├── scripts/
+│   └── push-secrets.sh     ← .env → Cloudflare secrets
 ├── src/
 │   ├── services/
 │   │   ├── guardian.ts     ← The Guardian API fetcher
 │   │   ├── hackernews.ts   ← Hacker News fetcher (no key needed)
-│   │   ├── mailer.ts       ← SMTP + SendGrid sender
-│   │   ├── news.ts         ← NewsAPI fetcher
+│   │   ├── http.ts         ← shared JSON fetch + timeouts
+│   │   ├── mailer.ts       ← Resend REST sender
 │   │   ├── quote.ts        ← ZenQuotes fetcher
 │   │   └── weather.ts      ← OpenWeatherMap fetcher
-│   ├── config.ts           ← All user-facing settings (start here)
-│   ├── index.ts            ← Entry point + cron scheduler
+│   ├── config.ts           ← content settings + Env (start here)
+│   ├── index.ts            ← scheduled() + fetch() handlers
 │   ├── template.ts         ← HTML email renderer
-│   └── types.ts            ← Shared TypeScript types
-├── .env.example            ← Copy to .env and fill in your keys
-├── .gitignore
+│   ├── time.ts             ← timezone-safe formatting + the DST gate
+│   └── types.ts            ← shared TypeScript types
+├── .env.example            ← copy to .env, then push-secrets.sh
+├── wrangler.jsonc          ← schedule, vars, cron triggers
 ├── package.json
-├── tsconfig.json
-└── README.md
+└── tsconfig.json
 ```
 
 ---
@@ -248,23 +226,37 @@ morning-briefing/
 
 | Service | Used for | Free tier | Link |
 |---|---|---|---|
+| Resend | Sending email | ✅ 3,000/month | [resend.com](https://resend.com) |
 | OpenWeatherMap | Weather | ✅ 1,000 calls/day | [openweathermap.org/api](https://openweathermap.org/api) |
 | The Guardian | Global news | ✅ 500 calls/day | [open-platform.theguardian.com](https://open-platform.theguardian.com/access/) |
 | Hacker News | Tech stories | ✅ No key needed | automatic |
-| NewsAPI | Keyword searches | ✅ 100 calls/day | [newsapi.org/register](https://newsapi.org/register) |
 | ZenQuotes | Quote of the day | ✅ No key needed | automatic |
+
+At one run a day this sits far inside every free tier, including Cloudflare's.
 
 ---
 
 ## Troubleshooting
 
-**Email not sending** — Gmail: use an App Password, not your account password. SendGrid: verify your sender address in the dashboard. Check `FROM_EMAIL` is set.
+**Email not sending** — check `npx wrangler tail` during a `POST /run`. `RESEND_API_KEY`
+missing or `RECIPIENT_EMAIL` unset both throw with that name in the message. If you're
+not using a verified domain, `onboarding@resend.dev` will only deliver to the Resend
+account owner's address.
 
-**No weather** — New API keys take ~10 min to activate. Try location as a plain city name: `"London"` not `"London, UK"`.
+**Brief arrived an hour early or late** — `DAILY_HOUR` and the cron expression have
+gone out of sync. Both must be updated together; see [Schedule](#schedule).
 
-**No news** — The free NewsAPI tier works for top headlines; the `everything` endpoint (used for keyword searches) is technically for dev/personal use only on the free plan.
+**Brief didn't arrive at all** — check the logs for `Skipping — … (DST twin firing)`.
+Seeing it on *both* daily firings means `DAILY_HOUR`/`TIMEZONE` don't match either
+cron hour.
 
-**Test without waiting for the schedule:**
-```bash
-node dist/index.js --now
-```
+**No weather** — new OpenWeatherMap keys take ~10 min to activate. Try a plain city
+name: `London`, not `London, UK`.
+
+**Quote missing sometimes** — expected. ZenQuotes rate-limits per source IP and Workers
+egress from shared Cloudflare IPs, so that budget isn't ours alone; it's also genuinely
+slow (10s+ cold). The section is dropped rather than retried. Set `quote.enabled = false`
+in `src/config.ts` if the intermittency bothers you.
+
+**No Hacker News section** — nothing cleared `minScore` inside `hoursBack`. Lower one
+of them in `src/config.ts`.

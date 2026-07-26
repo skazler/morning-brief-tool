@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "morning-brief",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+
+  "observability": { "enabled": true },
+
+  "vars": {
+    // Local wall-clock time the brief should arrive. These decide WHETHER a
+    // firing is the real one; the crons below decide when the Worker wakes at
+    // all — change one and you must change the other.
+    "TIMEZONE": "America/Chicago",
+    "DAILY_HOUR": "5",
+    "DAILY_MINUTE": "0",
+
+    // Content settings. Everything else lives in src/config.ts.
+    // RECIPIENT_NAME and WEATHER_LOCATION are deliberately NOT here — this file
+    // is committed to a public repo and a first name plus a city is
+    // deanonymizing. They live with the secrets instead.
+    "WEATHER_UNITS": "imperial",
+    "FROM_NAME": "Morning Briefing"
+  },
+
+  "triggers": {
+    // Cron is UTC-only, so the job is registered at BOTH its CDT and CST UTC
+    // hour and the handler no-ops on the one that isn't 05:00 local. This keeps
+    // 5 AM local year-round instead of drifting an hour every March.
+    //   05:00 CDT (UTC-5) = 10:00 UTC
+    //   05:00 CST (UTC-6) = 11:00 UTC
+    "crons": ["0 10,11 * * *"]
+  }
+
+  // Secrets (set with `wrangler secret put <NAME>`, never in this file —
+  // or run ./scripts/push-secrets.sh to migrate them straight from .env):
+  //   RECIPIENT_NAME        greeting in the email body
+  //   RECIPIENT_EMAIL       where the brief is sent
+  //   WEATHER_LOCATION      city name, or "lat,lon"
+  //   RESEND_API_KEY        resend.com
+  //   RESEND_FROM_ADDRESS   verified sender, or onboarding@resend.dev
+  //   OPENWEATHER_API_KEY   openweathermap.org/api
+  //   GUARDIAN_API_KEY      open-platform.theguardian.com/access
+  //   TRIGGER_SECRET        guards POST /run and GET /preview
+}

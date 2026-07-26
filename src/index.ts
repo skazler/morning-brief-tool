@@ -1,28 +1,31 @@
-import dotenv from "dotenv";
-import path from "path";
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
-
-import cron from "node-cron";
-import { format } from "date-fns";
-import { config } from "./config";
+import { Env, Config, makeConfig } from "./config";
 import { fetchWeather } from "./services/weather";
 import { fetchHackerNews } from "./services/hackernews";
 import { fetchGuardianSections } from "./services/guardian";
 import { fetchQuote } from "./services/quote";
-import { renderEmail } from "./template";
 import { sendEmail } from "./services/mailer";
+import { renderEmail } from "./template";
+import { formatLongDate, formatShortDate, shouldRunNow } from "./time";
 import { BriefingData } from "./types";
 
 // ─── Core job ─────────────────────────────────────────────────────────────────
 
-async function runBriefing(): Promise<void> {
-  console.log(`\n[briefing] Running at ${new Date().toISOString()}`);
+/**
+ * Gather every source and render the email. Each fetcher swallows its own errors
+ * and resolves to null/[], so one dead upstream costs you that section and not
+ * the whole brief — `Promise.all` never sees a rejection.
+ */
+async function buildBriefing(
+  cfg: Config
+): Promise<{ subject: string; html: string }> {
+  const now = new Date();
+  const { timezone } = cfg.schedule;
 
   const [weather, hackerNews, guardianSections, quote] = await Promise.all([
-    config.weather.enabled ? fetchWeather() : Promise.resolve(undefined),
-    config.hackerNews.enabled ? fetchHackerNews() : Promise.resolve(null),
-    config.guardian.enabled ? fetchGuardianSections() : Promise.resolve([]),
-    config.quote.enabled ? fetchQuote() : Promise.resolve(undefined),
+    cfg.weather.enabled ? fetchWeather(cfg) : Promise.resolve(null),
+    cfg.hackerNews.enabled ? fetchHackerNews(cfg) : Promise.resolve(null),
+    cfg.guardian.enabled ? fetchGuardianSections(cfg) : Promise.resolve([]),
+    cfg.quote.enabled ? fetchQuote() : Promise.resolve(null),
   ]);
 
   // Order: Guardian world → Guardian tech → Hacker News
@@ -32,43 +35,112 @@ async function runBriefing(): Promise<void> {
   ];
 
   const briefing: BriefingData = {
-    recipientName: config.recipient.name,
-    date: format(new Date(), "EEEE, MMMM do yyyy"),
+    recipientName: cfg.recipient.name,
+    date: formatLongDate(now, timezone),
     weather: weather ?? undefined,
     newsSections,
     quote: quote ?? undefined,
   };
 
-  const html = renderEmail(briefing);
-  const subject = config.email.subject.replace(
-    "{date}",
-    format(new Date(), "MMMM do")
-  );
+  return {
+    subject: cfg.email.subject.replace(
+      "{date}",
+      formatShortDate(now, timezone)
+    ),
+    html: renderEmail(briefing),
+  };
+}
 
-  await sendEmail({ subject, html });
+async function runBriefing(cfg: Config): Promise<void> {
+  console.log(`[briefing] Running at ${new Date().toISOString()}`);
+  const { subject, html } = await buildBriefing(cfg);
+  await sendEmail(cfg, { subject, html });
   console.log("[briefing] Done ✓");
 }
 
-// ─── Entry point ──────────────────────────────────────────────────────────────
+// ─── Manual-trigger auth ──────────────────────────────────────────────────────
 
-const args = process.argv.slice(2);
-
-if (args.includes("--now")) {
-  runBriefing().catch((err) => {
-    console.error("[briefing] Fatal error:", err);
-    process.exit(1);
-  });
-} else {
-  const { schedule } = config;
-  if (!cron.validate(schedule)) {
-    console.error(`[briefing] Invalid cron expression: "${schedule}"`);
-    process.exit(1);
+/** Length-independent compare, so a wrong key can't be narrowed by timing. */
+function secretMatches(provided: string, expected: string): boolean {
+  if (provided.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < provided.length; i++) {
+    diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
   }
-
-  console.log(`[briefing] Scheduled — cron: "${schedule}"`);
-  console.log(`[briefing] Run with --now to trigger immediately.`);
-
-  cron.schedule(schedule, () => {
-    runBriefing().catch((err) => console.error("[briefing] Error:", err));
-  });
+  return diff === 0;
 }
+
+// ─── Worker handlers ──────────────────────────────────────────────────────────
+
+export default {
+  /**
+   * Cron entry point. wrangler.jsonc registers two firings a day — one for CDT,
+   * one for CST — and this drops the one that isn't the configured local time.
+   * See `shouldRunNow` for why the match is a window rather than an equality.
+   */
+  async scheduled(_controller, env: Env, _ctx): Promise<void> {
+    const cfg = makeConfig(env);
+    const now = new Date();
+
+    if (!shouldRunNow(now, cfg.schedule)) {
+      console.log(
+        `[briefing] Skipping — ${now.toISOString()} is not ` +
+          `${cfg.schedule.hour}:${String(cfg.schedule.minute).padStart(2, "0")} ` +
+          `in ${cfg.schedule.timezone} (DST twin firing).`
+      );
+      return;
+    }
+
+    // Thrown errors mark the cron invocation as failed, which is what surfaces it
+    // in observability and `wrangler tail`. Don't swallow.
+    await runBriefing(cfg);
+  },
+
+  /**
+   * Manual trigger, replacing the old `node dist/index.js --now`.
+   *
+   *   POST /run      send the brief now
+   *   GET  /preview  render and return the HTML without sending
+   *
+   * Both require the TRIGGER_SECRET, by `Authorization: Bearer …` or `?key=`.
+   * Prefer the header — query strings are recorded in request logs.
+   */
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const cfg = makeConfig(env);
+    const url = new URL(request.url);
+
+    if (!env.TRIGGER_SECRET) {
+      return new Response("Manual trigger disabled: TRIGGER_SECRET is unset.\n", {
+        status: 503,
+      });
+    }
+
+    const provided =
+      request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+      url.searchParams.get("key") ??
+      "";
+
+    if (!secretMatches(provided, env.TRIGGER_SECRET)) {
+      return new Response("Forbidden\n", { status: 403 });
+    }
+
+    try {
+      if (url.pathname === "/preview") {
+        const { html } = await buildBriefing(cfg);
+        return new Response(html, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+
+      if (url.pathname === "/run" && request.method === "POST") {
+        await runBriefing(cfg);
+        return new Response("Sent ✓\n");
+      }
+    } catch (err: any) {
+      console.error("[briefing] Manual trigger failed:", err);
+      return new Response(`Failed: ${err.message}\n`, { status: 500 });
+    }
+
+    return new Response("POST /run · GET /preview\n", { status: 404 });
+  },
+} satisfies ExportedHandler<Env>;

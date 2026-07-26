@@ -1,23 +1,22 @@
-import axios from "axios";
+import { Config } from "../config";
 import { NewsSection, NewsArticle } from "../types";
-import { config } from "../config";
+import { formatTime } from "../time";
+import { getJson } from "./http";
 
 // Uses the Algolia HN Search API — no key needed
 // Docs: https://hn.algolia.com/api
 
-export async function fetchHackerNews(): Promise<NewsSection | null> {
-  const { pageSize, minScore, hoursBack } = config.hackerNews;
+export async function fetchHackerNews(cfg: Config): Promise<NewsSection | null> {
+  const { pageSize, minScore, hoursBack } = cfg.hackerNews;
 
   // Only fetch stories published within the configured window
   const since = Math.floor(Date.now() / 1000) - hoursBack * 60 * 60;
 
   try {
-    const { data } = await axios.get("https://hn.algolia.com/api/v1/search", {
-      params: {
-        tags: "story",
-        numericFilters: `points>=${minScore},created_at_i>${since}`,
-        hitsPerPage: pageSize,
-      },
+    const data = await getJson("https://hn.algolia.com/api/v1/search", {
+      tags: "story",
+      numericFilters: `points>=${minScore},created_at_i>${since}`,
+      hitsPerPage: pageSize,
     });
 
     if (!data.hits.length) {
@@ -34,10 +33,7 @@ export async function fetchHackerNews(): Promise<NewsSection | null> {
         : "news.ycombinator.com",
       description: `${h.points} points · ${h.num_comments} comments`,
       url: h.url ?? `https://news.ycombinator.com/item?id=${h.objectID}`,
-      publishedAt: new Date(h.created_at).toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
+      publishedAt: formatTime(new Date(h.created_at), cfg.schedule.timezone),
     }));
 
     return { heading: "Hacker News", articles };

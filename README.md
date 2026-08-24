@@ -1,21 +1,36 @@
-# ☀️ Morning Briefing
+# Morning Briefing
 
-A self-hosted, fully configurable daily email digest. Every morning it fetches weather, tech news, and a quote — then delivers a clean HTML email to your inbox.
+*A self-hosted daily email digest — weather, technical news, and a quote — assembled and delivered by a Cloudflare Worker on a cron trigger.*
 
-Runs on **Cloudflare Workers** — a cron trigger, no server, no container, nothing to keep awake.
+No server, no container, nothing to keep awake. One invocation a day, comfortably inside every free tier it touches.
+
+<p align="center">
+  <img src="public/emailBrief.png" alt="The rendered briefing — weather block, Hacker News section, and world news" width="620">
+</p>
 
 ---
 
-## Features
+## What it does
 
-- 🌤 **Weather** — current conditions for any city (OpenWeatherMap)
-- 📰 **Hacker News** — top technical stories, filtered by score (no key needed)
-- 🌍 **The Guardian** — global news with a non-US perspective
-- ✨ **Quote of the Day** — no API key needed (zenquotes.io)
-- 📬 **Email delivery** — via [Resend](https://resend.com)
-- ⏰ **Cron trigger** — fires once a day, DST-correct, costs nothing when idle
+Five independent fetchers run against the same deadline and assemble one HTML email:
 
-![Email preview](public/emailBrief.png)
+| Section | Source | Key required |
+| :--- | :--- | :--- |
+| Weather | OpenWeatherMap — current conditions for a city or `lat,lon` | yes |
+| Hacker News | Top stories, filtered by score and recency | no |
+| World news | The Guardian, by section and query | yes |
+| Quote | ZenQuotes | no |
+| Delivery | Resend | yes |
+
+**Every fetcher swallows its own errors and returns `null`.** A dead upstream costs you that one section, not the email. The template renders whatever survived.
+
+## Two things worth reading the code for
+
+**The DST gate.** Cloudflare cron is UTC-only, so a fixed *local* send time can't be expressed directly. The Worker is registered at both candidate UTC hours — `local + 5` and `local + 6` for US Central — and `shouldRunNow()` in [`src/time.ts`](src/time.ts) drops whichever firing isn't 5 AM local. Without it the brief drifts an hour every March and November. The `vars` decide *whether* to run; the cron decides only *when the Worker wakes at all*.
+
+> A Worker's clock is UTC and there is no `TZ` to set, so bare `new Date().getHours()` and `toLocaleTimeString()` silently mean UTC. Everything in this codebase goes through `src/time.ts`, whose helpers all take an explicit timezone.
+
+**What is a secret and what isn't.** `wrangler.jsonc` is committed, so it holds only the schedule, units, and sender name. `RECIPIENT_NAME` and `WEATHER_LOCATION` are Worker secrets rather than vars on purpose — a first name plus a city identifies you. Keys never touch the repo: `scripts/push-secrets.sh` pipes `.env` into Cloudflare without echoing anything, and CI never sees them, because `wrangler deploy` doesn't touch Worker secrets.
 
 ---
 
@@ -85,10 +100,6 @@ The `vars` decide *whether* to run; the cron decides *when the Worker wakes at a
 
 To move the time, change both — use [crontab.guru](https://crontab.guru), and remember
 the two UTC hours are `local + 5` and `local + 6` for US Central.
-
-> ⚠️ Never use bare `new Date().getHours()` or `toLocaleTimeString()` in this codebase.
-> A Worker's clock is UTC and there is no `TZ` to set, so those silently mean UTC.
-> Use the helpers in `src/time.ts`, which all take an explicit timezone.
 
 ### Weather
 
@@ -288,3 +299,9 @@ in `src/config.ts` if the intermittency bothers you.
 
 **No Hacker News section** — nothing cleared `minScore` inside `hoursBack`. Lower one
 of them in `src/config.ts`.
+
+---
+
+## License
+
+MIT.
